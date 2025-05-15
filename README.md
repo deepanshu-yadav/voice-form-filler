@@ -1,5 +1,7 @@
 We can use voice recognition to fill forms. 
 
+![Form](./images/form.png)
+
 # Installation 
 ## Setting Up Your Environment
 
@@ -43,3 +45,11 @@ For now the interaction is only from user to machine. Next is voice from machine
 
 ## Fine tune the model for more languages
 Support more Indian languages other than English.
+
+## Very slow need to run to on cpu.
+Quantize the model in order to run on devioces without GPU
+
+# Credits
+Thanks to repository which provided server implementation 
+
+https://github.com/KoljaB/RealtimeSTT 
