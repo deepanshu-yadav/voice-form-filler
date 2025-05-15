@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Recognition Form</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+            position: relative;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        input[type="text"],
+        input[type="email"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus,
+        textarea:focus {
+            border-color: #4d90fe;
+            outline: none;
+        }
+        
+        .active-field {
+            border: 2px solid #4CAF50 !important;
+            background-color: #f0fff0;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        .start-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        .stop-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .next-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .status-box {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-height: 100px;
+            background-color: #333;
+            color: white;
+        }
+        
+        .yellow {
+            color: yellow;
+        }
+        
+        .cyan {
+            color: cyan;
+        }
+        
+        .recording-indicator {
+            position: absolute;
+            right: 10px;
+            top: 40px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #f44336;
+            display: none;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .recording .recording-indicator {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Voice Recognition Form</h1>
+        
+        <form id="voiceForm">
+            <div class="form-group" id="nameGroup">
+                <label for="name">Name:</label>
+                <input type="text" id="name" name="name" required>
+                <div class="recording-indicator"></div>
+            </div>
+            
+            <div class="form-group" id="addressGroup">
+                <label for="address">Address:</label>
+                <textarea id="address" name="address" rows="3" required></textarea>
+                <div class="recording-indicator"></div>
+            </div>
+            
+            <div class="form-group" id="emailGroup">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+                <div class="recording-indicator"></div>
+            </div>
+            
+            <div class="form-group" id="phoneGroup">
+                <label for="phone">Contact Number:</label>
+                <input type="text" id="phone" name="phone" required>
+                <div class="recording-indicator"></div>
+            </div>
+            
+            <div class="button-group">
+                <button type="button" id="startRecording" class="start-btn">Start Recording</button>
+                <button type="button" id="stopRecording" class="stop-btn" disabled>Stop Recording</button>
+                <button type="button" id="lookGood" class="next-btn">Looks Good (Next Field)</button>
+            </div>
+            
+            <div class="status-box">
+                <h3>Recognition Status:</h3>
+                <div id="textDisplay"></div>
+                <p id="confirmationMessage">Was this correctly recognized?</p>
+            </div>
+        </form>
+    </div>
+    
+    <script>
+        let socket = new WebSocket("ws://localhost:8001");
+        let displayDiv = document.getElementById('textDisplay');
+        let server_available = false;
+        let mic_available = false;
+        let fullSentences = [];
+        let audioContext;
+        let source;
+        let processor;
+        let stream;
+        let isRecording = false;
+        let activeFieldId = 'name'; // Default active field
+        
+        const serverCheckInterval = 5000; // Check every 5 seconds
+        const formFields = ['name', 'address', 'email', 'phone'];
+        
+        // Set initial active field
+        document.getElementById(activeFieldId).classList.add('active-field');
+        document.getElementById(activeFieldId + 'Group').classList.add('recording');
+        
+        function connectToServer() {
+            socket = new WebSocket("ws://localhost:8001");
+        
+            socket.onopen = function(event) {
+                server_available = true;
+                updateStatus("Server connected");
+            };
+        
+            socket.onmessage = function(event) {
+                let data = JSON.parse(event.data);
+        
+                if (data.type === 'realtime') {
+                    displayRealtimeText(data.text, displayDiv);
+                } else if (data.type === 'fullSentence') {
+                    fullSentences.push(data.text);
+                    // Update the active field with the recognized text
+                    updateActiveFieldWithRecognition(data.text);
+                    displayRealtimeText("", displayDiv); // Refresh display with new full sentence
+                    // Show confirmation message
+                    document.getElementById('confirmationMessage').textContent = "Was this correctly recognized?";
+                }
+            };
+        
+            socket.onclose = function(event) {
+                server_available = false;
+                updateStatus("Server disconnected");
+            };
+        }
+        
+        function displayRealtimeText(realtimeText, displayDiv) {
+            let displayedText = fullSentences.map((sentence, index) => {
+                return `<span class="${index % 2 === 0 ? 'yellow' : 'cyan'}">${sentence} </span>`;
+            }).join('') + realtimeText;
+        
+            displayDiv.innerHTML = displayedText;
+        }
+        
+        function updateStatus(message) {
+            if (!mic_available)
+                displayRealtimeText("🎤 Please allow microphone access 🎤", displayDiv);
+            else if (!server_available)
+                displayRealtimeText("🖥️ Please start the recognition server 🖥️", displayDiv);
+            else if (message)
+                displayRealtimeText(message, displayDiv);
+        }
+        
+        function updateActiveFieldWithRecognition(text) {
+            const activeField = document.getElementById(activeFieldId);
+            if (activeField) {
+                // For append mode, you could use: activeField.value += text + " ";
+                activeField.value = text; // Replace mode
+            }
+        }
+        
+        function startRecording() {
+            if (!mic_available || !server_available) {
+                alert("Microphone access or server connection is not available");
+                return;
+            }
+            
+            if (isRecording) return;
+            
+            isRecording = true;
+            document.getElementById('startRecording').disabled = true;
+            document.getElementById('stopRecording').disabled = false;
+            
+            // Clear previous sentences
+            fullSentences = [];
+            displayRealtimeText("Listening...", displayDiv);
+            
+            // Mark the active field group as recording
+            document.getElementById(activeFieldId + 'Group').classList.add('recording');
+            
+            if (stream) {
+                startAudioProcessing();
+            } else {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(str => {
+                    stream = str;
+                    startAudioProcessing();
+                })
+                .catch(e => {
+                    console.error("Error getting audio stream:", e);
+                    updateStatus("Failed to access microphone");
+                    isRecording = false;
+                    document.getElementById('startRecording').disabled = false;
+                    document.getElementById('stopRecording').disabled = true;
+                });
+            }
+        }
+        
+        function startAudioProcessing() {
+            if (!audioContext) {
+                audioContext = new AudioContext();
+            }
+            
+            source = audioContext.createMediaStreamSource(stream);
+            processor = audioContext.createScriptProcessor(256, 1, 1);
+            
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            
+            processor.onaudioprocess = function(e) {
+                if (!isRecording) return;
+                
+                let inputData = e.inputBuffer.getChannelData(0);
+                let outputData = new Int16Array(inputData.length);
+                
+                // Convert to 16-bit PCM
+                for (let i = 0; i < inputData.length; i++) {
+                    outputData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                }
+                
+                // Send the 16-bit PCM data to the server
+                if (socket.readyState === WebSocket.OPEN) {
+                    // Create a JSON string with metadata
+                    let metadata = JSON.stringify({ sampleRate: audioContext.sampleRate });
+                    // Convert metadata to a byte array
+                    let metadataBytes = new TextEncoder().encode(metadata);
+                    // Create a buffer for metadata length (4 bytes for 32-bit integer)
+                    let metadataLength = new ArrayBuffer(4);
+                    let metadataLengthView = new DataView(metadataLength);
+                    // Set the length of the metadata in the first 4 bytes
+                    metadataLengthView.setInt32(0, metadataBytes.byteLength, true); // true for little-endian
+                    // Combine metadata length, metadata, and audio data into a single message
+                    let combinedData = new Blob([metadataLength, metadataBytes, outputData.buffer]);
+                    socket.send(combinedData);
+                }
+            };
+        }
+        
+        function stopRecording() {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            document.getElementById('startRecording').disabled = false;
+            document.getElementById('stopRecording').disabled = true;
+            
+            // Remove recording indicator
+            document.getElementById(activeFieldId + 'Group').classList.remove('recording');
+            
+            if (processor) {
+                processor.disconnect();
+            }
+            
+            displayRealtimeText("Recording stopped", displayDiv);
+        }
+        
+        function moveToNextField() {
+            // Remove active class from current field
+            document.getElementById(activeFieldId).classList.remove('active-field');
+            document.getElementById(activeFieldId + 'Group').classList.remove('recording');
+            
+            // Find the index of the current field
+            const currentIndex = formFields.indexOf(activeFieldId);
+            
+            // Move to the next field or loop back to the first
+            if (currentIndex < formFields.length - 1) {
+                activeFieldId = formFields[currentIndex + 1];
+            } else {
+                activeFieldId = formFields[0];
+            }
+            
+            // Add active class to new field
+            document.getElementById(activeFieldId).classList.add('active-field');
+            
+            // If recording, update the recording indicator
+            if (isRecording) {
+                document.getElementById(activeFieldId + 'Group').classList.add('recording');
+            }
+            
+            // Focus on the new active field
+            document.getElementById(activeFieldId).focus();
+            
+            // Clear recognition display
+            fullSentences = [];
+            displayRealtimeText(`Now recording for ${activeFieldId}...`, displayDiv);
+        }
+        
+        // Initial setup
+        connectToServer();
+        
+        // Request access to the microphone
+        navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(str => {
+            stream = str;
+            mic_available = true;
+            updateStatus("Microphone access granted. Ready to start recording.");
+        })
+        .catch(e => {
+            console.error("Error getting audio stream:", e);
+            updateStatus("Failed to access microphone. Please check your settings.");
+        });
+        
+        // Check server availability periodically
+        setInterval(() => {
+            if (!server_available) {
+                connectToServer();
+            }
+        }, serverCheckInterval);
+        
+        // Event listeners
+        document.getElementById('startRecording').addEventListener('click', startRecording);
+        document.getElementById('stopRecording').addEventListener('click', stopRecording);
+        document.getElementById('lookGood').addEventListener('click', moveToNextField);
+        
+        // Prevent form submission
+        document.getElementById('voiceForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+        });
+    </script>
+</body>
+</html>
