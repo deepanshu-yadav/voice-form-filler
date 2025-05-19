@@ -89,6 +89,7 @@ https://github.com/k2-fsa/sherpa-onnx/tree/master
 2. Voice output after filling the text field 
 3. Interaction with only voice such as hey there is an extra r in my name after e or the ee in my name instead of i in my name. 
 4. Ability to execute this on tiny devices other than desktop. 
+5. Streaming instead of sending .wav files to server.
 
 
 
