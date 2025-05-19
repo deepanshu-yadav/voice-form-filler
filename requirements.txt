@@ -12,3 +12,6 @@ websocket-client==1.8.0
 soundfile==0.13.1
 RealtimeSTT
 RealtimeTTS
+librosa
+kaldi_native_fbank
+onnxruntime

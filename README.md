@@ -30,10 +30,36 @@ conda activate myenv
 conda deactivate
 ```
 
+# Downloading speech recognition models
+
+```
+mkdir models
+cd models
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
+tar xvf sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
+rm sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
+
+wget https://dldata-public.s3.us-east-2.amazonaws.com/2086-149220-0033.wav
+mv 2086-149220-0033.wav file.wav
+cd ..
+```
+Finally execute the testing script as 
+
+```
+python ./test_model.py \
+  --encoder ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx \
+  --decoder ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/decoder.int8.onnx \
+  --joiner ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/joiner.int8.onnx \
+  --tokens ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/tokens.txt \
+  --wav models/file.wav
+```
+
+
 # Execution
 
 ```
-python server.py
+python .\asr_server.py --encoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\encoder.int8.onnx --decoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\decoder.int8.onnx  --joiner .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\joiner.int8.onnx --tokens .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\tokens.txt --port 8001
+
 ```
 
 Now double click `voice-form.html`
@@ -53,3 +79,16 @@ Quantize the model in order to run on devioces without GPU
 Thanks to repository which provided server implementation 
 
 https://github.com/KoljaB/RealtimeSTT 
+
+and 
+
+https://github.com/k2-fsa/sherpa-onnx/tree/master
+
+# Coming soon 
+1. Support for languages other than english 
+2. Voice output after filling the text field 
+3. Interaction with only voice such as hey there is an extra r in my name after e or the ee in my name instead of i in my name. 
+4. Ability to execute this on tiny devices other than desktop. 
+
+
+
