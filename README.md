@@ -64,16 +64,6 @@ python .\asr_server.py --encoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-
 
 Now double click `voice-form.html`
 
-# Future Plans
-
-## Make interaction birectional
-For now the interaction is only from user to machine. Next is voice from machine to user in order to give feedback to user. So this eliminate all buttons just saying ok next field will work.
-
-## Fine tune the model for more languages
-Support more Indian languages other than English.
-
-## Very slow need to run to on cpu.
-Quantize the model in order to run on devioces without GPU
 
 # Credits
 Thanks to repository which provided server implementation 
