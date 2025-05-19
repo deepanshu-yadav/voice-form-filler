@@ -15,3 +15,6 @@ python ./test_model.py \
 For starting the server
 
 python .\asr_server.py --encoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\encoder.int8.onnx --decoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\decoder.int8.onnx  --joiner .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\joiner.int8.onnx --tokens .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\tokens.txt --port 8001
+
+
+curl -v -s -X POST http://localhost:8000/api/tts -H "Content-Type: application/json" -d "{\"text\":\"Hello, this is a test\",\"voice\":\"af_nicole\",\"language\":\"en-us\"}" --output test.wav

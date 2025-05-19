@@ -1,0 +1,283 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kokoro TTS Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            margin-bottom: 10px;
+            padding: 10px;
+            font-family: inherit;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        select, input, button {
+            padding: 8px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            min-width: 120px;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+            font-style: italic;
+        }
+        .debug {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Kokoro TTS Client</h1>
+    
+    <textarea id="textInput" placeholder="Enter text to synthesize...">This is a test for the Kokoro speech synthesis model. It demonstrates streaming audio playback from the server. The audio is played as soon as each chunk is received.</textarea>
+    
+    <div class="controls">
+        <select id="voiceInput">
+            <option value="af_nicole">Nicole (African)</option>
+            <option value="us_tom">Tom (US)</option>
+            <option value="us_mark">Mark (US)</option>
+            <option value="us_nancy">Nancy (US)</option>
+            <option value="gb_emma">Emma (UK)</option>
+            <option value="in_priya">Priya (Indian)</option>
+        </select>
+        
+        <label>
+            Speed: 
+            <input type="number" id="speedInput" value="1.0" min="0.5" max="2.0" step="0.1">
+        </label>
+        
+        <select id="languageInput">
+            <option value="en-us">English (US)</option>
+            <option value="en-gb">English (UK)</option>
+        </select>
+        
+        <button id="streamButton">Stream Audio</button>
+        <button id="stopButton" disabled>Stop</button>
+    </div>
+    
+    <div id="status">Ready</div>
+    
+    <div class="debug" id="debugLog"></div>
+    
+    <script>
+        // Audio context and queue management
+        let audioContext;
+        let audioQueue = [];
+        let isPlaying = false;
+        let socket;
+        let currentSource;
+        let debugMode = true;
+        
+        // Get DOM elements
+        const textInput = document.getElementById('textInput');
+        const voiceInput = document.getElementById('voiceInput');
+        const speedInput = document.getElementById('speedInput');
+        const languageInput = document.getElementById('languageInput');
+        const streamButton = document.getElementById('streamButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusEl = document.getElementById('status');
+        const debugLog = document.getElementById('debugLog');
+        
+        // Initialize WebAudio context (will be created on first user interaction)
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                log('Audio context initialized');
+            }
+            return audioContext;
+        }
+        
+        // Log to debug panel
+        function log(message) {
+            if (debugMode) {
+                const entry = document.createElement('div');
+                entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+                debugLog.appendChild(entry);
+                debugLog.scrollTop = debugLog.scrollHeight;
+            }
+        }
+        
+        // Update status message
+        function setStatus(message) {
+            statusEl.textContent = message;
+            log(message);
+        }
+        
+        // Connect to server and start streaming
+        streamButton.addEventListener('click', function() {
+            // Initialize audio context (must be done after user interaction)
+            initAudioContext();
+            
+            // Clear any existing audio queue
+            audioQueue = [];
+            isPlaying = false;
+            
+            const text = textInput.value.trim();
+            
+            if (!text) {
+                setStatus('Please enter some text to synthesize');
+                return;
+            }
+            
+            // Update UI
+            streamButton.disabled = true;
+            stopButton.disabled = false;
+            setStatus('Connecting to server...');
+            
+            // Close existing socket if any
+            if (socket) {
+                socket.close();
+            }
+            
+            // Hardcode the WebSocket URL
+            const wsUrl = 'ws://localhost:8000/ws/stream';
+            console.log(`Connecting to WebSocket: ${wsUrl}`);
+            console.log(`Current location: protocol=${location.protocol}, host=${location.host}, href=${location.href}`);
+            // Connect to WebSocket server
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function() {
+                setStatus('Connected. Requesting audio stream...');
+                
+                // Send synthesis request
+                socket.send(JSON.stringify({
+                    text: text,
+                    voice: voiceInput.value,
+                    speed: parseFloat(speedInput.value),
+                    language: languageInput.value
+                }));
+            };
+            
+            socket.onmessage = async function(event) {
+                // Make sure we received binary data
+                if (event.data instanceof Blob) {
+                    // Convert blob to array buffer
+                    const arrayBuffer = await event.data.arrayBuffer();
+                    
+                    // Add to queue and start playing if not already playing
+                    audioQueue.push(arrayBuffer);
+                    log(`Received audio chunk (${(arrayBuffer.byteLength / 1024).toFixed(1)} KB)`);
+                    
+                    if (!isPlaying) {
+                        playNextInQueue();
+                    }
+                } else {
+                    // Handle text messages (likely errors)
+                    setStatus(`Server message: ${event.data}`);
+                }
+            };
+            
+            socket.onclose = function(event) {
+                if (event.wasClean) {
+                    setStatus(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                } else {
+                    setStatus('Connection lost');
+                }
+                streamButton.disabled = false;
+            };
+            
+            socket.onerror = function(error) {
+                setStatus(`WebSocket error: ${error.message}`);
+                streamButton.disabled = false;
+            };
+        });
+        
+        // Stop streaming and playback
+        stopButton.addEventListener('click', function() {
+            // Close socket
+            if (socket) {
+                socket.close();
+            }
+            
+            // Stop current playback
+            if (currentSource) {
+                currentSource.stop();
+                currentSource = null;
+            }
+            
+            // Clear queue
+            audioQueue = [];
+            isPlaying = false;
+            
+            // Update UI
+            streamButton.disabled = false;
+            stopButton.disabled = true;
+            setStatus('Playback stopped');
+        });
+        
+        // Play next audio chunk in queue
+        async function playNextInQueue() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                setStatus('Playback complete');
+                return;
+            }
+            
+            isPlaying = true;
+            const arrayBuffer = audioQueue.shift();
+            
+            try {
+                // Decode the audio data
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                // Create a source node
+                currentSource = audioContext.createBufferSource();
+                currentSource.buffer = audioBuffer;
+                
+                // Connect to audio output
+                currentSource.connect(audioContext.destination);
+                
+                // Play the audio
+                currentSource.start(0);
+                setStatus(`Playing audio (${audioQueue.length} chunks remaining in queue)`);
+                
+                // When this chunk finishes playing, play the next one
+                currentSource.onended = function() {
+                    currentSource = null;
+                    playNextInQueue();
+                };
+                
+            } catch (error) {
+                log(`Error decoding audio: ${error.message}`);
+                // Try to continue with next chunk
+                playNextInQueue();
+            }
+        }
+        
+        // If we're running the page directly from file, provide a helpful message
+        if (location.protocol === 'file:') {
+            setStatus('⚠️ This client must be served from your Kokoro server to work correctly!');
+        }
+    </script>
+</body>
+</html>

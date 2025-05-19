@@ -15,3 +15,7 @@ RealtimeTTS
 librosa
 kaldi_native_fbank
 onnxruntime
+kokoro-onnx
+sounddevice
+uvicorn
+fastapi
