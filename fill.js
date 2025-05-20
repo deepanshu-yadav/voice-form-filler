@@ -14,6 +14,7 @@ let mic_available = false;
 let fullSentences = [];
 let mediaRecorder;
 let audioChunks = [];
+let isAskingCorrection = false
 let stream;
 let isRecording = false;
 let activeFieldId = 'name'; // Default active field
@@ -260,6 +261,26 @@ function stopRecording() {
     }
 }
 
+async function correctString(inputString, action) {
+      try {
+        const response = await fetch('http://localhost:11434/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gemma3:1b',
+            prompt: `You are a string corrector. For the input string "${inputString}", perform the action: "${action}". Return only the corrected string. Example: input "Dipanshu", action "Remove i and replace it with ee" returns "Deepanshu".`,
+            stream: false
+          })
+        });
+        if (!response.ok) throw new Error('Failed to fetch');
+        const data = await response.json();
+        return data.response.trim();
+      } catch (error) {
+        console.error('Error:', error);
+        return inputString;
+      }
+}
+
 function announce(message){
     // Check if audio context is initialized must be done on user interaction
     initAudioContext();
@@ -322,6 +343,12 @@ function announce(message){
         console.log(`WebSocket error: ${error.message}`);
     };
         
+}
+
+function askCorrection() {
+    console.log("Asking for correction");
+    isAskingCorrection = true;
+    
 }
 function moveToNextField() {
     console.log("Moving to next field from", activeFieldId);
@@ -413,6 +440,7 @@ setInterval(() => {
 document.getElementById('startRecording').addEventListener('click', startRecording);
 document.getElementById('stopRecording').addEventListener('click', stopRecording);
 document.getElementById('lookGood').addEventListener('click', moveToNextField);
+document.getElementById('askCorrect').addEventListener('click', askCorrection);
 document.getElementById('voiceForm').addEventListener('submit', function(e) {
     e.preventDefault();
     console.log("Form submission prevented");

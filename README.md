@@ -108,6 +108,59 @@ and then click on `play_voice.html`
         scoop install ffmpeg
         ```    
 
+# Install Ollama 
+
+
+
+Please Ollama installed (ollama.ai).
+## Set Environment Variable
+Enable CORS by setting OLLAMA_ORIGINS to allow requests from http://localhost:8080 (web server).
+#### Windows (Command Prompt)
+```
+set OLLAMA_ORIGINS=http://localhost:8080
+ollama serve
+```
+
+#### Windows (PowerShell)
+```
+$env:OLLAMA_ORIGINS="http://localhost:8080"
+ollama serve
+```
+
+#### Linux/macOS
+```
+export OLLAMA_ORIGINS=http://localhost:8080
+ollama serve
+```
+
+## Configure Model
+Use the gemma3:1b model for string correction.
+
+#### Install Model:
+```
+ollama pull gemma3:1b
+```
+
+#### Verify Model:
+```
+ollama list
+```
+Confirm gemma3:1b is listed.
+
+
+#### Test API:
+
+Run the following curl command with proper JSON encoding:
+```
+  curl -X POST http://localhost:11434/api/generate -d "{\"model\":\"gemma3:1b\",\"prompt\":\"You are a string corrector. For the input string \\\"Dipanshu\\\", perform the action: \\\"Remove i and replace it with ee\\\". Return only the corrected string.\",\"stream\":false}"
+```
+
+#### Troubleshoot
+
+Port Conflict:
+Windows: netstat -aon | findstr :11434, then taskkill /PID <PID> /F.
+Linux: lsof -i :11434, then kill -9 <PID>.
+
 # Execution
 
 
