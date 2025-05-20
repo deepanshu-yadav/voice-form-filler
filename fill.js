@@ -7,6 +7,7 @@ let audioQueue = [];
 let isPlaying = false;
 let currentSource = null;
 
+let currentResponseString= ""
 let audioContext = null;
 let displayDiv = document.getElementById('textDisplay');
 let server_available = false;
@@ -54,18 +55,27 @@ function connectToServer() {
             console.log("WebSocket connection established");
         };
 
-        socket.onmessage = function(event) {
+        socket.onmessage = async function(event) {
             try {
                 let data = JSON.parse(event.data);
                 if (data.type === 'fullSentence') {
-                    fullSentences.push(data.text);
-                    updateActiveFieldWithRecognition(data.text);
+                    result = "";
+                    if (!isAskingCorrection){
+                        fullSentences.push(data.text);
+                        currentResponseString = data.text;
+                        result = data.text;
+                    }
+                    else{
+                        result = await correctString(currentResponseString, data.text);
+                        isAskingCorrection = false;
+                    }
+                    updateActiveFieldWithRecognition(result);
                     displayRealtimeText("", displayDiv);
                     document.getElementById('confirmationMessage').textContent =
                         `Was this correctly recognized? (RTF: ${data.rtf.toFixed(2)})`;
-                    console.log("Received transcription:", data.text);
+                    console.log("Received transcription:", result);
                     // Playing the text recieved
-                    announce(data.text);
+                    announce(result + " Was this correctly recognized?");
                 
                 } else if (data.type === 'error') {
                     updateStatus(`Error: ${data.message}`);
@@ -348,6 +358,8 @@ function announce(message){
 function askCorrection() {
     console.log("Asking for correction");
     isAskingCorrection = true;
+    startRecording();
+
     
 }
 function moveToNextField() {
