@@ -1,3 +1,4 @@
+// fill.js
 // WebSocket and recording logic
 let socket = null;
 let displayDiv = document.getElementById('textDisplay');
@@ -13,12 +14,19 @@ const serverCheckInterval = 5000; // Check every 5 seconds
 const formFields = ['name', 'address', 'email', 'phone'];
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
+let reconnectTimeout = null;
 
 // Set initial active field
 document.getElementById(activeFieldId).classList.add('active-field');
 document.getElementById(activeFieldId + 'Group').classList.add('recording');
 
 function connectToServer() {
+    // Clear any existing reconnect timeout
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
     // Close existing connection if any
     if (socket) {
         try {
@@ -27,17 +35,17 @@ function connectToServer() {
             console.error("Error closing existing socket:", e);
         }
     }
-    
+
     try {
         socket = new WebSocket("ws://localhost:8001");
-        
+
         socket.onopen = function(event) {
             server_available = true;
             reconnectAttempts = 0;
             updateStatus("Server connected");
             console.log("WebSocket connection established");
         };
-        
+
         socket.onmessage = function(event) {
             try {
                 let data = JSON.parse(event.data);
@@ -45,7 +53,7 @@ function connectToServer() {
                     fullSentences.push(data.text);
                     updateActiveFieldWithRecognition(data.text);
                     displayRealtimeText("", displayDiv);
-                    document.getElementById('confirmationMessage').textContent = 
+                    document.getElementById('confirmationMessage').textContent =
                         `Was this correctly recognized? (RTF: ${data.rtf.toFixed(2)})`;
                     console.log("Received transcription:", data.text);
                 } else if (data.type === 'error') {
@@ -56,25 +64,26 @@ function connectToServer() {
                 console.error("Error processing message:", e, event.data);
             }
         };
-        
+
         socket.onclose = function(event) {
             server_available = false;
             console.log("WebSocket connection closed:", event.code, event.reason);
             updateStatus("Server disconnected");
-            
-            // If we were recording, stop
+
             if (isRecording) {
                 stopRecording();
             }
-            
-            // Try to reconnect if not closing cleanly
+
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                 reconnectAttempts++;
                 console.log(`Connection closed. Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-                setTimeout(connectToServer, 2000); // Wait 2 seconds before reconnecting
+                reconnectTimeout = setTimeout(connectToServer, Math.min(1000 * Math.pow(2, reconnectAttempts), 16000));
+            } else {
+                console.log("Max reconnect attempts reached. Stopping reconnection.");
+                updateStatus("Failed to reconnect to server after maximum attempts.");
             }
         };
-        
+
         socket.onerror = function(error) {
             console.error("WebSocket error:", error);
         };
@@ -114,17 +123,17 @@ function startRecording() {
         alert("Microphone access is not available. Please check your browser permissions.");
         return;
     }
-    
+
     if (!server_available) {
         alert("Server connection is not available. Please ensure the ASR server is running.");
         return;
     }
-    
+
     if (isRecording) {
         console.log("Already recording, ignoring start request");
         return;
     }
-    
+
     isRecording = true;
     document.getElementById('startRecording').disabled = true;
     document.getElementById('stopRecording').disabled = false;
@@ -158,18 +167,26 @@ function startAudioProcessing() {
     console.log("Starting audio processing");
     try {
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-        
+
         mediaRecorder.ondataavailable = function(e) {
             if (e.data.size > 0) {
                 audioChunks.push(e.data);
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    console.log("Sending audio chunk, size:", e.data.size);
+                    socket.send(e.data); // Send each chunk immediately
+                } else {
+                    console.error("Cannot send audio chunk: WebSocket not open");
+                    updateStatus("Cannot send audio: Server not connected. Attempting to reconnect...");
+                    connectToServer();
+                }
             }
         };
-        
+
         mediaRecorder.onerror = function(e) {
             console.error("MediaRecorder error:", e);
         };
-        
-        mediaRecorder.start();
+
+        mediaRecorder.start(100); // Capture data every 100ms
         console.log("MediaRecorder started");
     } catch (e) {
         console.error("Error starting MediaRecorder:", e);
@@ -186,7 +203,7 @@ function stopRecording() {
         console.log("Not recording, ignoring stop request");
         return;
     }
-    
+
     isRecording = false;
     document.getElementById('startRecording').disabled = false;
     document.getElementById('stopRecording').disabled = true;
@@ -196,100 +213,31 @@ function stopRecording() {
         try {
             mediaRecorder.stop();
             console.log("MediaRecorder stopped");
-            
+
             mediaRecorder.onstop = function() {
                 console.log("Processing recorded audio chunks:", audioChunks.length);
                 if (audioChunks.length === 0) {
                     updateStatus("No audio recorded");
                     return;
                 }
-                
-                createWavFile(audioChunks, (wavBlob) => {
-                    if (socket && socket.readyState === WebSocket.OPEN) {
-                        console.log("Sending audio to server");
-                        socket.send(wavBlob);
-                        displayRealtimeText("Processing audio...", displayDiv);
-                    } else {
-                        console.error("Cannot send audio: WebSocket not open");
-                        updateStatus("Cannot send audio: Server not connected. Attempting to reconnect...");
-                        connectToServer();
-                    }
-                });
+
+                // Send stop signal
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    console.log("Sending stop signal");
+                    socket.send(JSON.stringify({ type: "stop" }));
+                    displayRealtimeText("Processing audio...", displayDiv);
+                } else {
+                    console.error("Cannot send stop signal: WebSocket not open");
+                    updateStatus("Cannot send stop signal: Server not connected. Attempting to reconnect...");
+                    connectToServer();
+                }
+                audioChunks = []; // Clear chunks after sending
             };
         } catch (e) {
             console.error("Error stopping MediaRecorder:", e);
         }
     } else {
         console.log("MediaRecorder not available or already inactive");
-    }
-}
-
-function createWavFile(chunks, callback) {
-    console.log("Creating WAV file from chunks");
-    try {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        const audioContext = new AudioContext();
-        
-        blob.arrayBuffer().then(arrayBuffer => {
-            console.log("Decoding audio data");
-            audioContext.decodeAudioData(arrayBuffer, (audioBuffer) => {
-                console.log("Audio data decoded successfully");
-                const wavBuffer = audioBufferToWav(audioBuffer);
-                const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-                callback(wavBlob);
-            }, (e) => {
-                console.error("Error decoding audio data:", e);
-                updateStatus("Failed to process audio");
-            });
-        }).catch(e => {
-            console.error("Error converting blob to array buffer:", e);
-            updateStatus("Failed to process audio");
-        });
-    } catch (e) {
-        console.error("Error creating WAV file:", e);
-        updateStatus("Failed to create audio file");
-    }
-}
-
-function audioBufferToWav(audioBuffer) {
-    const numChannels = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
-    const length = audioBuffer.length * numChannels * 2 + 44;
-    const buffer = new ArrayBuffer(length);
-    const view = new DataView(buffer);
-
-    // WAV header
-    writeString(view, 0, 'RIFF');
-    view.setUint32(4, 36 + audioBuffer.length * numChannels * 2, true);
-    writeString(view, 8, 'WAVE');
-    writeString(view, 12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM format
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * numChannels * 2, true);
-    view.setUint16(32, numChannels * 2, true);
-    view.setUint16(34, 16, true); // Bits per sample
-    writeString(view, 36, 'data');
-    view.setUint32(40, audioBuffer.length * numChannels * 2, true);
-
-    // Audio data
-    let offset = 44;
-    for (let i = 0; i < audioBuffer.length; i++) {
-        for (let channel = 0; channel < numChannels; channel++) {
-            const sample = audioBuffer.getChannelData(channel)[i];
-            const value = Math.max(-1, Math.min(1, sample)) * 32767;
-            view.setInt16(offset, value, true);
-            offset += 2;
-        }
-    }
-
-    return buffer;
-}
-
-function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
     }
 }
 
@@ -334,7 +282,7 @@ navigator.mediaDevices.getUserMedia({ audio: true })
 
 // Setup periodic server connection check
 setInterval(() => {
-    if (!server_available) {
+    if (!server_available && !reconnectTimeout) {
         console.log("Server check: not connected, attempting to connect");
         connectToServer();
     }

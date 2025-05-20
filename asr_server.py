@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # Copyright 2025 Xiaomi Corp. (authors: Fangjun Kuang)
-# Modified for WebSocket server integration
+# Modified for WebSocket server with chunked audio and stop signal
 
 import argparse
 import asyncio
 import json
 import os
+import io
 import tempfile
 from pathlib import Path
 import websockets
@@ -16,6 +17,7 @@ import onnxruntime as ort
 import soundfile as sf
 import torch
 import time
+from pydub import AudioSegment  # For handling webm chunks
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -153,92 +155,120 @@ class OnnxModel:
         return logit
 
 async def process_audio(websocket, model, id2token):
+    audio_chunks = []
     tmp_file = None
     try:
-        # Receive WAV file data
-        try:
-            wav_data = await websocket.recv()
-        except websockets.exceptions.ConnectionClosed:
-            print("Connection closed while receiving data")
-            return
+        async for message in websocket:
+            try:
+                # Check if the message is a stop signal
+                if isinstance(message, str):
+                    data = json.loads(message)
+                    if data.get("type") == "stop":
+                        print("Received stop signal")
+                        if not audio_chunks:
+                            await websocket.send(json.dumps({
+                                "type": "error",
+                                "message": "No audio chunks received"
+                            }))
+                            continue
+                        # Combine chunks into a single audio file
+                        audio_data = b''.join(audio_chunks)
+                        # Convert webm chunks to WAV
+                        try:
+                            audio = AudioSegment.from_file(io.BytesIO(audio_data), format="webm")
+                            tmp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                            audio.export(tmp_file.name, format="wav")
+                            wav_path = tmp_file.name
+                        except Exception as e:
+                            await websocket.send(json.dumps({
+                                "type": "error",
+                                "message": f"Failed to convert audio chunks to WAV: {str(e)}"
+                            }))
+                            audio_chunks = []
+                            continue
 
-        # Create a temporary file to store the WAV
-        tmp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        tmp_file.write(wav_data)
-        tmp_file.close()
-        wav_path = tmp_file.name
+                        # Process the WAV file with ASR
+                        start = time.time()
+                        fbank = create_fbank()
+                        audio, sample_rate = sf.read(wav_path, dtype="float32", always_2d=True)
+                        audio = audio[:, 0]  # Use first channel
+                        if sample_rate != 16000:
+                            audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
+                            sample_rate = 16000
 
-        # Process the WAV file with ASR
-        start = time.time()
-        fbank = create_fbank()
-        audio, sample_rate = sf.read(wav_path, dtype="float32", always_2d=True)
-        audio = audio[:, 0]  # Use first channel
-        if sample_rate != 16000:
-            audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
-            sample_rate = 16000
+                        tail_padding = np.zeros(sample_rate * 2)
+                        audio = np.concatenate([audio, tail_padding])
 
-        tail_padding = np.zeros(sample_rate * 2)
-        audio = np.concatenate([audio, tail_padding])
+                        blank = len(id2token) - 1
+                        ans = [blank]
+                        state0, state1 = model.get_decoder_state()
+                        decoder_out, state0_next, state1_next = model.run_decoder(ans[-1], state0, state1)
 
-        blank = len(id2token) - 1
-        ans = [blank]
-        state0, state1 = model.get_decoder_state()
-        decoder_out, state0_next, state1_next = model.run_decoder(ans[-1], state0, state1)
+                        features = compute_features(audio, fbank)
+                        if model.normalize_type != "":
+                            assert model.normalize_type == "per_feature", model.normalize_type
+                            features = torch.from_numpy(features)
+                            mean = features.mean(dim=1, keepdims=True)
+                            stddev = features.std(dim=1, keepdims=True) + 1e-5
+                            features = (features - mean) / stddev
+                            features = features.numpy()
 
-        features = compute_features(audio, fbank)
-        if model.normalize_type != "":
-            assert model.normalize_type == "per_feature", model.normalize_type
-            features = torch.from_numpy(features)
-            mean = features.mean(dim=1, keepdims=True)
-            stddev = features.std(dim=1, keepdims=True) + 1e-5
-            features = (features - mean) / stddev
-            features = features.numpy()
+                        encoder_out = model.run_encoder(features)
+                        for t in range(encoder_out.shape[2]):
+                            encoder_out_t = encoder_out[:, :, t : t + 1]
+                            logits = model.run_joiner(encoder_out_t, decoder_out)
+                            logits = torch.from_numpy(logits)
+                            logits = logits.squeeze()
+                            idx = torch.argmax(logits, dim=-1).item()
+                            if idx != blank:
+                                ans.append(idx)
+                                state0 = state0_next
+                                state1 = state1_next
+                                decoder_out, state0_next, state1_next = model.run_decoder(
+                                    ans[-1], state0, state1
+                                )
 
-        encoder_out = model.run_encoder(features)
-        for t in range(encoder_out.shape[2]):
-            encoder_out_t = encoder_out[:, :, t : t + 1]
-            logits = model.run_joiner(encoder_out_t, decoder_out)
-            logits = torch.from_numpy(logits)
-            logits = logits.squeeze()
-            idx = torch.argmax(logits, dim=-1).item()
-            if idx != blank:
-                ans.append(idx)
-                state0 = state0_next
-                state1 = state1_next
-                decoder_out, state0_next, state1_next = model.run_decoder(
-                    ans[-1], state0, state1
-                )
+                        end = time.time()
+                        elapsed_seconds = end - start
+                        audio_duration = audio.shape[0] / 16000
+                        real_time_factor = elapsed_seconds / audio_duration
 
-        end = time.time()
-        elapsed_seconds = end - start
-        audio_duration = audio.shape[0] / 16000
-        real_time_factor = elapsed_seconds / audio_duration
+                        ans = ans[1:]  # Remove the first blank
+                        tokens = [id2token[i] for i in ans]
+                        underline = "▁"
+                        text = "".join(tokens).replace(underline, " ").strip()
 
-        ans = ans[1:]  # Remove the first blank
-        tokens = [id2token[i] for i in ans]
-        underline = "▁"
-        text = "".join(tokens).replace(underline, " ").strip()
+                        # Send transcription back to client
+                        await websocket.send(json.dumps({
+                            "type": "fullSentence",
+                            "text": text,
+                            "rtf": real_time_factor
+                        }))
+                        audio_chunks = []  # Clear chunks after processing
+                        continue
 
-        # Send transcription back to client
-        try:
-            response = {"type": "fullSentence", "text": text, "rtf": real_time_factor}
-            await websocket.send(json.dumps(response))
-        except websockets.exceptions.ConnectionClosed:
-            print("Failed to send results - connection closed")
-
-    except Exception as e:
-        print(f"Error processing audio: {e}")
-        try:
-            await websocket.send(json.dumps({"type": "error", "message": str(e)}))
-        except websockets.exceptions.ConnectionClosed:
-            print("Failed to send error message - connection closed")
+                # Treat binary data as an audio chunk
+                if isinstance(message, bytes):
+                    print(f"Received audio chunk, size: {len(message)} bytes")
+                    audio_chunks.append(message)
+            except json.JSONDecodeError:
+                print("Received non-JSON message, treating as audio chunk")
+                audio_chunks.append(message)
+            except Exception as e:
+                print(f"Error processing message: {e}")
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": str(e)
+                }))
+    except websockets.exceptions.ConnectionClosed:
+        print("Connection closed while receiving data")
     finally:
-        # Clean up temporary file
         if tmp_file is not None and os.path.exists(tmp_file.name):
             try:
                 os.unlink(tmp_file.name)
             except Exception as e:
                 print(f"Error removing temporary file: {e}")
+        print("Connection closed")
 
 async def main():
     args = get_args()
@@ -263,9 +293,14 @@ async def main():
             print(f"Error in handler: {e}")
 
     print(f"Starting WebSocket server on ws://localhost:{args.port}")
-    
     try:
-        async with websockets.serve(handler, "localhost", args.port):
+        async with websockets.serve(
+            handler,
+            "localhost",
+            args.port,
+            ping_interval=20,
+            ping_timeout=60
+        ):
             print("Server started successfully")
             await asyncio.Future()  # Run forever
     except Exception as e:

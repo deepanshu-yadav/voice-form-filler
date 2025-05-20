@@ -19,3 +19,4 @@ kokoro-onnx
 sounddevice
 uvicorn
 fastapi
+pydub
