@@ -1,6 +1,13 @@
 // fill.js
 // WebSocket and recording logic
 let socket = null;
+// Varriable for audio playback
+let voiceSocket = null;
+let audioQueue = [];
+let isPlaying = false;
+let currentSource = null;
+
+let audioContext = null;
 let displayDiv = document.getElementById('textDisplay');
 let server_available = false;
 let mic_available = false;
@@ -56,6 +63,9 @@ function connectToServer() {
                     document.getElementById('confirmationMessage').textContent =
                         `Was this correctly recognized? (RTF: ${data.rtf.toFixed(2)})`;
                     console.log("Received transcription:", data.text);
+                    // Playing the text recieved
+                    announce(data.text);
+                
                 } else if (data.type === 'error') {
                     updateStatus(`Error: ${data.message}`);
                     console.error("Server error:", data.message);
@@ -91,6 +101,15 @@ function connectToServer() {
         console.error("Error creating WebSocket:", e);
         server_available = false;
     }
+}
+
+// Initialize WebAudio context (will be created on first user interaction)
+function initAudioContext() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('Audio context initialized');
+    }
+    return audioContext;
 }
 
 function displayRealtimeText(realtimeText, displayDiv) {
@@ -241,6 +260,69 @@ function stopRecording() {
     }
 }
 
+function announce(message){
+    // Check if audio context is initialized must be done on user interaction
+    initAudioContext();
+            
+    // Clear any existing audio queue
+    audioQueue = [];
+    isPlaying = false;
+
+    // Close existing socket if any
+    if (voiceSocket) {
+        voiceSocket.close();
+    }
+    console.log("Announcing message:", message);
+    // Hardcode the WebSocket URL
+    const wsUrl = 'ws://localhost:8000/ws/stream';
+    console.log(`Connecting to WebSocket: ${wsUrl}`);
+    console.log(`Current location: protocol=${location.protocol}, host=${location.host}, href=${location.href}`);
+    // Connect to WebSocket server
+    voiceSocket = new WebSocket(wsUrl);
+    voiceSocket.onopen = function() {
+        console.log('Connected. Requesting audio stream...');
+        
+        // Send synthesis request
+        voiceSocket.send(JSON.stringify({
+            text: message,
+            voice: "af_nicole",
+            speed: parseFloat(1.0),
+            language: "en-us"
+        }));
+    };
+    
+    voiceSocket.onmessage = async function(event) {
+        // Make sure we received binary data
+        if (event.data instanceof Blob) {
+            // Convert blob to array buffer
+            const arrayBuffer = await event.data.arrayBuffer();
+            
+            // Add to queue and start playing if not already playing
+            audioQueue.push(arrayBuffer);
+            console.log(`Received audio chunk (${(arrayBuffer.byteLength / 1024).toFixed(1)} KB)`);
+            
+            if (!isPlaying) {
+                playNextInQueue();
+            }
+        } else {
+            // Handle text messages (likely errors)
+            console.log(`Server message: ${event.data}`);
+        }
+    };
+    
+    voiceSocket.onclose = function(event) {
+        if (event.wasClean) {
+            console.log(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+        } else {
+            console.log('Connection lost');
+        }
+    };
+    
+    voiceSocket.onerror = function(error) {
+        console.log(`WebSocket error: ${error.message}`);
+    };
+        
+}
 function moveToNextField() {
     console.log("Moving to next field from", activeFieldId);
     document.getElementById(activeFieldId).classList.remove('active-field');
@@ -260,6 +342,45 @@ function moveToNextField() {
     displayRealtimeText(`Now recording for ${activeFieldId}...`, displayDiv);
     document.getElementById('confirmationMessage').textContent = "";
     console.log("New active field:", activeFieldId);
+}
+
+// Play next audio chunk in queue
+async function playNextInQueue() {
+    if (audioQueue.length === 0) {
+        isPlaying = false;
+        setStatus('Playback complete');
+        return;
+    }
+    
+    isPlaying = true;
+    const arrayBuffer = audioQueue.shift();
+    
+    try {
+        // Decode the audio data
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        // Create a source node
+        currentSource = audioContext.createBufferSource();
+        currentSource.buffer = audioBuffer;
+        
+        // Connect to audio output
+        currentSource.connect(audioContext.destination);
+        
+        // Play the audio
+        currentSource.start(0);
+        setStatus(`Playing audio (${audioQueue.length} chunks remaining in queue)`);
+        
+        // When this chunk finishes playing, play the next one
+        currentSource.onended = function() {
+            currentSource = null;
+            playNextInQueue();
+        };
+        
+    } catch (error) {
+        console.log(`Error decoding audio: ${error.message}`);
+        // Try to continue with next chunk
+        playNextInQueue();
+    }
 }
 
 // Initial setup
