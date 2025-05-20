@@ -277,8 +277,8 @@ async function correctString(inputString, action) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'gemma3:1b',
-            prompt: `You are a string corrector. For the input string "${inputString}", perform the action: "${action}". Return only the corrected string. Example: input "Dipanshu", action "Remove i and replace it with ee" returns "Deepanshu".`,
+            model: 'granite3.1-dense:2b',
+            prompt: `You are a string corrector. For the input string "${inputString}", perform the action: "${action}". Return ONLY the corrected string. Never the input string. Example: input "Dipanshu", action "Remove i and replace it with ee" returns "Deepanshu".`,
             stream: false
           })
         });

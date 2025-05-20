@@ -134,25 +134,25 @@ ollama serve
 ```
 
 ## Configure Model
-Use the gemma3:1b model for string correction.
+Use the  granite3.1-dense:2b model for string correction.
 
 #### Install Model:
 ```
-ollama pull gemma3:1b
+ollama pull  granite3.1-dense:2b
 ```
 
 #### Verify Model:
 ```
 ollama list
 ```
-Confirm gemma3:1b is listed.
+Confirm  granite3.1-dense:2b is listed.
 
 
 #### Test API:
 
 Run the following curl command with proper JSON encoding:
 ```
-  curl -X POST http://localhost:11434/api/generate -d "{\"model\":\"gemma3:1b\",\"prompt\":\"You are a string corrector. For the input string \\\"Dipanshu\\\", perform the action: \\\"Remove i and replace it with ee\\\". Return only the corrected string.\",\"stream\":false}"
+  curl -X POST http://localhost:11434/api/generate -d "{\"model\":\"granite3.1-dense:2b\",\"prompt\":\"You are a string corrector. For the input string \\\"Dipanshu\\\", perform the action: \\\"Remove i and replace it with ee\\\". Return only the corrected string.\",\"stream\":false}"
 ```
 
 #### Troubleshoot
@@ -203,7 +203,7 @@ https://github.com/k2-fsa/sherpa-onnx/tree/master
 # Coming soon 
 1. Support for languages other than english 
 2. Voice output after filling the text field  -> Done
-3. Interaction with only voice such as hey there is an extra r in my name after e or the ee in my name instead of i in my name. 
+3. Interaction with only voice such as hey there is an extra r in my name after e or the ee in my name instead of i in my name. -> Done
 4. Ability to execute this on tiny devices other than desktop. 
 5. Streaming instead of sending .wav files to server. -> Done 
 
