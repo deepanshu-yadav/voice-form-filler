@@ -110,10 +110,30 @@ and then click on `play_voice.html`
 
 # Execution
 
+
+First the recognition server
+On Windows
 ```
 python .\asr_server.py --encoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\encoder.int8.onnx --decoder .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\decoder.int8.onnx  --joiner .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\joiner.int8.onnx --tokens .\models\sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8\tokens.txt --port 8001
 
 ```
+On linux
+
+```
+python ./asr_server.py \
+  --encoder ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx \
+  --decoder ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/decoder.int8.onnx \
+  --joiner ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/joiner.int8.onnx \
+  --tokens ./models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/tokens.txt \
+  --port 8001
+
+```
+
+
+Start the tts server (Text to Speech Server)
+
+`python tts_server.py`
+
 
 Now double click `voice-form.html`
 
@@ -129,10 +149,10 @@ https://github.com/k2-fsa/sherpa-onnx/tree/master
 
 # Coming soon 
 1. Support for languages other than english 
-2. Voice output after filling the text field 
+2. Voice output after filling the text field  -> Done
 3. Interaction with only voice such as hey there is an extra r in my name after e or the ee in my name instead of i in my name. 
 4. Ability to execute this on tiny devices other than desktop. 
-5. Streaming instead of sending .wav files to server.
+5. Streaming instead of sending .wav files to server. -> Done 
 
 
 
