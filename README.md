@@ -1,10 +1,8 @@
-https://github.com/deepanshu-yadav/voice-form-filler/tree/main/images/video.mp4
-
-We can use vo
+We can use voice recognition to fill forms. 
 
 https://github.com/user-attachments/assets/be8c74b8-681f-4242-96b2-65a0f696fd38
 
-ice recognition to fill forms. 
+
 
 ![Form](./images/form.png)
 
